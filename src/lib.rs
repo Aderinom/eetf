@@ -37,6 +37,7 @@ use std::io;
 mod codec;
 pub mod convert;
 pub mod pattern;
+pub mod string_convert;
 
 pub use crate::codec::DecodeError;
 pub use crate::codec::DecodeResult;
@@ -190,6 +191,25 @@ impl From<Map> for Term {
         Term::Map(x)
     }
 }
+impl From<bool> for Term {
+    fn from(value: bool) -> Self {
+        return Term::from(Atom::from(value));
+    }
+}
+
+// Integer auto to Fix integer
+macro_rules! impl_from_integer_to_term {
+    ( $($fromInt:ty),* ) => {
+        $( impl From<$fromInt> for Term
+        {
+            fn from(number:$fromInt) -> Term
+            {
+                Term::FixInteger(FixInteger::from(number))
+            }
+        } )*
+    };
+}
+impl_from_integer_to_term!(u8, i8, u16, i16, i32);
 
 /// Atom.
 #[derive(Debug, PartialEq, Eq, Hash, Clone)]
@@ -216,6 +236,19 @@ impl<'a> From<&'a str> for Atom {
 impl From<String> for Atom {
     fn from(name: String) -> Self {
         Atom { name }
+    }
+}
+impl From<bool> for Atom {
+    fn from(boolean: bool) -> Self {
+        if boolean {
+            Atom {
+                name: "true".to_string(),
+            }
+        } else {
+            Atom {
+                name: "false".to_string(),
+            }
+        }
     }
 }
 
