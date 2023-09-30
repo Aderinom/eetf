@@ -1,4 +1,5 @@
 use super::*;
+use codec_common::*;
 use crate::convert::TryAsRef;
 use byteorder::BigEndian;
 use byteorder::ReadBytesExt;
@@ -9,85 +10,6 @@ use std::convert::From;
 use std::io;
 use std::io::Write;
 use std::str;
-
-/// Errors which can occur when decoding a term
-#[derive(Debug, thiserror::Error)]
-pub enum DecodeError {
-    #[error("I/O error")]
-    Io(#[from] io::Error),
-
-    #[error("the format version {version} is unsupported")]
-    UnsupportedVersion { version: u8 },
-
-    #[error("unknown tag {tag}")]
-    UnknownTag { tag: u8 },
-
-    #[error("{value} is not a {expected}")]
-    UnexpectedType { value: Term, expected: String },
-
-    #[error("{value} is out of range {range:?}")]
-    OutOfRange {
-        value: i32,
-        range: std::ops::Range<i32>,
-    },
-
-    #[error("tried to convert non-finite float")]
-    NonFiniteFloat,
-}
-
-/// Errors which can occur when encoding a term
-#[derive(Debug, thiserror::Error)]
-pub enum EncodeError {
-    #[error("I/O error")]
-    Io(#[from] io::Error),
-
-    #[error("too long atom name: {} bytes", .0.name.len())]
-    TooLongAtomName(Atom),
-
-    #[error("too large integer value: {} bytes required to encode", .0.value.to_bytes_le().1.len())]
-    TooLargeInteger(BigInteger),
-
-    #[error("too large reference ID: {} bytes required to encode", .0.id.len() * 4)]
-    TooLargeReferenceId(Reference),
-}
-
-pub type DecodeResult = Result<Term, DecodeError>;
-pub type EncodeResult = Result<(), EncodeError>;
-
-const VERSION: u8 = 131;
-
-const DISTRIBUTION_HEADER: u8 = 68;
-const NEW_FLOAT_EXT: u8 = 70;
-const BIT_BINARY_EXT: u8 = 77;
-const COMPRESSED_TERM: u8 = 80;
-const ATOM_CACHE_REF: u8 = 82;
-const NEW_PID_EXT: u8 = 88;
-const NEW_PORT_EXT: u8 = 89;
-const NEWER_REFERENCE_EXT: u8 = 90;
-const SMALL_INTEGER_EXT: u8 = 97;
-const INTEGER_EXT: u8 = 98;
-const FLOAT_EXT: u8 = 99;
-const ATOM_EXT: u8 = 100; // deprecated
-const REFERENCE_EXT: u8 = 101; // deprecated
-const PORT_EXT: u8 = 102;
-const PID_EXT: u8 = 103;
-const SMALL_TUPLE_EXT: u8 = 104;
-const LARGE_TUPLE_EXT: u8 = 105;
-const NIL_EXT: u8 = 106;
-const STRING_EXT: u8 = 107;
-const LIST_EXT: u8 = 108;
-const BINARY_EXT: u8 = 109;
-const SMALL_BIG_EXT: u8 = 110;
-const LARGE_BIG_EXT: u8 = 111;
-const NEW_FUN_EXT: u8 = 112;
-const EXPORT_EXT: u8 = 113;
-const NEW_REFERENCE_EXT: u8 = 114;
-const SMALL_ATOM_EXT: u8 = 115; // deprecated
-const MAP_EXT: u8 = 116;
-const FUN_EXT: u8 = 117;
-const ATOM_UTF8_EXT: u8 = 118;
-const SMALL_ATOM_UTF8_EXT: u8 = 119;
-const V4_PORT_EXT: u8 = 120;
 
 pub struct Decoder<R> {
     reader: R,
@@ -434,7 +356,7 @@ impl<R: io::Read> Decoder<R> {
 }
 
 pub struct Encoder<W> {
-    writer: W,
+    pub(crate) writer: W,
 }
 impl<W: io::Write> Encoder<W> {
     pub fn new(writer: W) -> Self {
@@ -444,7 +366,7 @@ impl<W: io::Write> Encoder<W> {
         self.writer.write_u8(VERSION)?;
         self.encode_term(term)
     }
-    fn encode_term(&mut self, term: &Term) -> EncodeResult {
+    pub(crate) fn encode_term(&mut self, term: &Term) -> EncodeResult {
         match *term {
             Term::Atom(ref x) => self.encode_atom(x),
             Term::FixInteger(ref x) => self.encode_fix_integer(x),
@@ -464,11 +386,11 @@ impl<W: io::Write> Encoder<W> {
             Term::ByteList(ref x) => self.encode_byte_list(x.bytes.as_slice())
         }
     }
-    fn encode_nil(&mut self) -> EncodeResult {
+    pub(crate) fn encode_nil(&mut self) -> EncodeResult {
         self.writer.write_u8(NIL_EXT)?;
         Ok(())
     }
-    fn encode_list(&mut self, x: &List) -> EncodeResult {
+    pub(crate) fn encode_list(&mut self, x: &List) -> EncodeResult {
         let to_byte = |e: &Term| {
             e.try_as_ref()
                 .and_then(|&FixInteger { value: i }| if i < 0x100 { Some(i as u8) } else { None })
@@ -496,7 +418,7 @@ impl<W: io::Write> Encoder<W> {
         }
         Ok(())
     }
-    fn encode_improper_list(&mut self, x: &ImproperList) -> EncodeResult {
+    pub(crate) fn encode_improper_list(&mut self, x: &ImproperList) -> EncodeResult {
         self.writer.write_u8(LIST_EXT)?;
         self.writer
             .write_u32::<BigEndian>(x.elements.len() as u32)?;
@@ -506,7 +428,7 @@ impl<W: io::Write> Encoder<W> {
         self.encode_term(&x.last)?;
         Ok(())
     }
-    fn encode_tuple(&mut self, x: &Tuple) -> EncodeResult {
+    pub(crate) fn encode_tuple(&mut self, x: &Tuple) -> EncodeResult {
         if x.elements.len() < 0x100 {
             self.writer.write_u8(SMALL_TUPLE_EXT)?;
             self.writer.write_u8(x.elements.len() as u8)?;
@@ -520,7 +442,7 @@ impl<W: io::Write> Encoder<W> {
         }
         Ok(())
     }
-    fn encode_map(&mut self, x: &Map) -> EncodeResult {
+    pub(crate) fn encode_map(&mut self, x: &Map) -> EncodeResult {
         self.writer.write_u8(MAP_EXT)?;
         self.writer.write_u32::<BigEndian>(x.map.len() as u32)?;
         for (k, v) in x.map.iter() {
@@ -529,20 +451,20 @@ impl<W: io::Write> Encoder<W> {
         }
         Ok(())
     }
-    fn encode_byte_list(&mut self, x: &[u8]) -> EncodeResult{
+    pub(crate) fn encode_byte_list(&mut self, x: &[u8]) -> EncodeResult{
         self.writer.write_u8(STRING_EXT)?;
         self.writer.write_u16::<BigEndian>(x.len() as u16)?;
         self.writer.write_all(x)?;
         
         Ok(())
     }
-    fn encode_binary(&mut self, x: &Binary) -> EncodeResult {
+    pub(crate) fn encode_binary(&mut self, x: &Binary) -> EncodeResult {
         self.writer.write_u8(BINARY_EXT)?;
         self.writer.write_u32::<BigEndian>(x.bytes.len() as u32)?;
         self.writer.write_all(&x.bytes)?;
         Ok(())
     }
-    fn encode_bit_binary(&mut self, x: &BitBinary) -> EncodeResult {
+    pub(crate) fn encode_bit_binary(&mut self, x: &BitBinary) -> EncodeResult {
         self.writer.write_u8(BIT_BINARY_EXT)?;
         self.writer.write_u32::<BigEndian>(x.bytes.len() as u32)?;
         self.writer.write_u8(x.tail_bits_size)?;
@@ -553,12 +475,12 @@ impl<W: io::Write> Encoder<W> {
         }
         Ok(())
     }
-    fn encode_float(&mut self, x: &Float) -> EncodeResult {
+    pub(crate) fn encode_float(&mut self, x: &Float) -> EncodeResult {
         self.writer.write_u8(NEW_FLOAT_EXT)?;
         self.writer.write_f64::<BigEndian>(x.value)?;
         Ok(())
     }
-    fn encode_atom(&mut self, x: &Atom) -> EncodeResult {
+    pub(crate) fn encode_atom(&mut self, x: &Atom) -> EncodeResult {
         if x.name.len() > 0xFFFF {
             return Err(EncodeError::TooLongAtomName(x.clone()));
         }
@@ -573,7 +495,7 @@ impl<W: io::Write> Encoder<W> {
         self.writer.write_all(x.name.as_bytes())?;
         Ok(())
     }
-    fn encode_fix_integer(&mut self, x: &FixInteger) -> EncodeResult {
+    pub(crate) fn encode_fix_integer(&mut self, x: &FixInteger) -> EncodeResult {
         if 0 <= x.value && x.value <= i32::from(std::u8::MAX) {
             self.writer.write_u8(SMALL_INTEGER_EXT)?;
             self.writer.write_u8(x.value as u8)?;
@@ -583,7 +505,7 @@ impl<W: io::Write> Encoder<W> {
         }
         Ok(())
     }
-    fn encode_big_integer(&mut self, x: &BigInteger) -> EncodeResult {
+    pub(crate) fn encode_big_integer(&mut self, x: &BigInteger) -> EncodeResult {
         let (sign, bytes) = x.value.to_bytes_le();
         if bytes.len() <= std::u8::MAX as usize {
             self.writer.write_u8(SMALL_BIG_EXT)?;
@@ -598,7 +520,7 @@ impl<W: io::Write> Encoder<W> {
         self.writer.write_all(&bytes)?;
         Ok(())
     }
-    fn encode_pid(&mut self, x: &Pid) -> EncodeResult {
+    pub(crate) fn encode_pid(&mut self, x: &Pid) -> EncodeResult {
         self.writer.write_u8(NEW_PID_EXT)?;
         self.encode_atom(&x.node)?;
         self.writer.write_u32::<BigEndian>(x.id)?;
@@ -606,7 +528,7 @@ impl<W: io::Write> Encoder<W> {
         self.writer.write_u32::<BigEndian>(x.creation)?;
         Ok(())
     }
-    fn encode_port(&mut self, x: &Port) -> EncodeResult {
+    pub(crate) fn encode_port(&mut self, x: &Port) -> EncodeResult {
         if (x.id >> 32) & 0xFFFFFFFF == 0 {
             self.writer.write_u8(NEW_PORT_EXT)?;
             self.encode_atom(&x.node)?;
@@ -620,7 +542,7 @@ impl<W: io::Write> Encoder<W> {
         }
         Ok(())
     }
-    fn encode_reference(&mut self, x: &Reference) -> EncodeResult {
+    pub(crate) fn encode_reference(&mut self, x: &Reference) -> EncodeResult {
         self.writer.write_u8(NEWER_REFERENCE_EXT)?;
         if x.id.len() > std::u16::MAX as usize {
             return Err(EncodeError::TooLargeReferenceId(x.clone()));
@@ -633,14 +555,14 @@ impl<W: io::Write> Encoder<W> {
         }
         Ok(())
     }
-    fn encode_external_fun(&mut self, x: &ExternalFun) -> EncodeResult {
+    pub(crate) fn encode_external_fun(&mut self, x: &ExternalFun) -> EncodeResult {
         self.writer.write_u8(EXPORT_EXT)?;
         self.encode_atom(&x.module)?;
         self.encode_atom(&x.function)?;
         self.encode_fix_integer(&FixInteger::from(i32::from(x.arity)))?;
         Ok(())
     }
-    fn encode_internal_fun(&mut self, x: &InternalFun) -> EncodeResult {
+    pub(crate) fn encode_internal_fun(&mut self, x: &InternalFun) -> EncodeResult {
         match *x {
             InternalFun::Old {
                 ref module,
@@ -691,73 +613,5 @@ impl<W: io::Write> Encoder<W> {
             }
         }
         Ok(())
-    }
-}
-
-mod aux {
-    use num::bigint::Sign;
-    use std::io;
-    use std::ops::Range;
-    use std::str;
-
-    pub fn term_into_atom(t: crate::Term) -> Result<crate::Atom, super::DecodeError> {
-        t.try_into()
-            .map_err(|t| super::DecodeError::UnexpectedType {
-                value: t,
-                expected: "Atom".to_string(),
-            })
-    }
-    pub fn term_into_pid(t: crate::Term) -> Result<crate::Pid, super::DecodeError> {
-        t.try_into()
-            .map_err(|t| super::DecodeError::UnexpectedType {
-                value: t,
-                expected: "Pid".to_string(),
-            })
-    }
-    pub fn term_into_fix_integer(t: crate::Term) -> Result<crate::FixInteger, super::DecodeError> {
-        t.try_into()
-            .map_err(|t| super::DecodeError::UnexpectedType {
-                value: t,
-                expected: "FixInteger".to_string(),
-            })
-    }
-    pub fn term_into_ranged_integer(
-        t: crate::Term,
-        range: Range<i32>,
-    ) -> Result<i32, super::DecodeError> {
-        term_into_fix_integer(t).and_then(|i| {
-            let n = i.value;
-            if range.start <= n && n <= range.end {
-                Ok(n)
-            } else {
-                Err(super::DecodeError::OutOfRange { value: n, range })
-            }
-        })
-    }
-    pub fn invalid_data_error<T>(message: String) -> io::Result<T> {
-        Err(io::Error::new(io::ErrorKind::InvalidData, message))
-    }
-    pub fn other_error<T>(message: String) -> io::Result<T> {
-        Err(io::Error::new(io::ErrorKind::Other, message))
-    }
-    pub fn latin1_bytes_to_string(buf: &[u8]) -> io::Result<String> {
-        // FIXME: Supports Latin1 characters
-        str::from_utf8(buf)
-            .or_else(|e| other_error(e.to_string()))
-            .map(ToString::to_string)
-    }
-    pub fn byte_to_sign(b: u8) -> io::Result<Sign> {
-        match b {
-            0 => Ok(Sign::Plus),
-            1 => Ok(Sign::Minus),
-            _ => invalid_data_error(format!("A sign value must be 0 or 1: value={}", b)),
-        }
-    }
-    pub fn sign_to_byte(sign: Sign) -> u8 {
-        if sign == Sign::Minus {
-            1
-        } else {
-            0
-        }
     }
 }

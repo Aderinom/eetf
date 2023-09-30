@@ -35,14 +35,19 @@ use std::hash::Hash;
 use std::io;
 
 mod codec;
+mod codec_common;
+
+#[cfg(feature = "tokio-async")]
+mod async_codec;
+
 pub mod convert;
 pub mod pattern;
 pub mod string_convert;
 
-pub use crate::codec::DecodeError;
-pub use crate::codec::DecodeResult;
-pub use crate::codec::EncodeError;
-pub use crate::codec::EncodeResult;
+pub use crate::codec_common::DecodeError;
+pub use crate::codec_common::DecodeResult;
+pub use crate::codec_common::EncodeError;
+pub use crate::codec_common::EncodeResult;
 
 /// Term.
 #[derive(Debug, PartialEq, Eq, Hash, Clone)]
@@ -73,6 +78,22 @@ impl Term {
     /// Encodes the term.
     pub fn encode<W: io::Write>(&self, writer: W) -> EncodeResult {
         codec::Encoder::new(writer).encode(self)
+    }
+
+    #[cfg(feature = "tokio-async")]
+    pub async fn encode_async<W: tokio::io::AsyncRead + std::marker::Unpin + std::marker::Send>(
+        &self,
+        reader: W,
+    ) -> EncodeResult {
+        async_codec::AsyncDecoder::new(reader).encode(self).await
+    }
+
+    #[cfg(feature = "tokio-async")]
+    pub async fn decode_async<W: tokio::io::AsyncRead + std::marker::Unpin + std::marker::Send>(
+        &self,
+        reader: W,
+    ) -> DecodeResult {
+        async_codec::AsyncDecoder::new(reader).encode(self).await
     }
 
     pub fn as_match<'a, P>(&'a self, pattern: P) -> pattern::Result<P::Output>
@@ -830,6 +851,12 @@ impl From<Vec<Term>> for Tuple {
     fn from(elements: Vec<Term>) -> Self {
         Tuple { elements }
     }
+}
+#[macro_export]
+macro_rules! tuple {
+    ($($term:expr),*) => {
+        Tuple::from(vec![$($term.into()),*])
+    };
 }
 
 /// Map.

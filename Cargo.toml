@@ -20,3 +20,9 @@ byteorder = "1"
 libflate = "1"
 ordered-float = "2"
 thiserror = "1"
+tokio = { version = "1.32.0", features = ["io-util"], optional = true}
+async-recursion = "1.0.5"
+
+[features]
+# Defines a feature named `webp` that does not enable any other features.
+tokio-async = ["dep:tokio"]
